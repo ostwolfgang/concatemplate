@@ -1,7 +1,7 @@
 #include <tuple>
 #include <type_traits>
 
-namespace detail {
+namespace tuple_detail {
 
     template<typename>
     struct is_tuple: std::false_type {};
@@ -89,50 +89,73 @@ struct Literal {
 };
 
 template<typename T, typename Program>
-requires detail::is_tuple<typename Program::value_type>::value
+requires tuple_detail::is_tuple<typename Program::value_type>::value
 struct Push {
-    using value_type = detail::tuple_cat_helper<typename Program::value_type, typename T::value_type>::type;
+    using value_type = tuple_detail::tuple_cat_helper<typename Program::value_type, typename T::value_type>::type;
     static constexpr value_type value() {
         return std::tuple_cat(T::value(), Program::value());
     }
 };
 
 template<typename Program>
-requires detail::is_tuple<typename Program::value_type>::value
+requires tuple_detail::is_tuple<typename Program::value_type>::value
 struct Pop {
-    using value_type = detail::remove<typename Program::value_type, 1>::type;
+    using value_type = tuple_detail::remove<typename Program::value_type, 1>::type;
     static constexpr value_type value() {
-        return detail::remove<typename Program::value_type, 1>()(Program().value());
+        return tuple_detail::remove<typename Program::value_type, 1>()(Program().value());
     }
 };
 
-template<typename Program>
-requires detail::is_tuple<typename Program::value_type>::value &&
-         (std::tuple_size<typename Program::value_type>::value >= 3)
-struct Add {
-    using value_type = detail::tuple_cat_helper<typename detail::remove<typename Program::value_type, 2>::type,
-                                                std::tuple<decltype(std::get<0>(Program().value()) +
-                                                                    std::get<1>(Program().value()))>>::type;
-    static constexpr value_type value() {
-        auto prog = Program();
-        return std::tuple_cat(
-            std::tuple(std::get<0>(prog.value()) + std::get<1>(prog.value())),
-            detail::remove<typename Program::value_type, 2>()(prog.value())
-        );
-    }
-};
+
+// Binary operations (a b --> c)
+namespace binop_detail {
+
+    // Generic binary operation instruction
+    template<typename Op, typename Program>
+    requires tuple_detail::is_tuple<typename Program::value_type>::value &&
+             (std::tuple_size<typename Program::value_type>::value >= 3)
+    struct BinOp {
+        using op_result_type = Op::result_type;
+        using value_type = tuple_detail::tuple_cat_helper<typename tuple_detail::remove<typename Program::value_type, 2>::type,
+                                                          std::tuple<op_result_type>>::type;
+        static constexpr value_type value() {
+            auto prog = Program();
+            auto val = prog.value();
+            return std::tuple_cat(
+                std::tuple(Op()(std::get<0>(val), std::get<1>(val))),
+                tuple_detail::remove<typename Program::value_type, 2>()(val)
+            );
+        }
+    };
+
+    template<typename A, typename B>
+    struct Sum {
+        auto operator()(A a, B b) const {
+            return a + b;
+        }
+        using result_type = std::invoke_result<Sum<A, B>, A, B>::type;
+    };
+
+    template<typename A, typename B>
+    struct Equals {
+        auto operator()(A a, B b) const {
+            return a == b;
+        }
+        using result_type = std::invoke_result<Equals<A, B>, A, B>::type;
+    };
+
+}
 
 template<typename Program>
-requires detail::is_tuple<typename Program::value_type>::value &&
+requires tuple_detail::is_tuple<typename Program::value_type>::value &&
          (std::tuple_size<typename Program::value_type>::value >= 3)
-struct Equals {
-    using value_type = detail::tuple_cat_helper<typename detail::remove<typename Program::value_type, 2>::type,
-                                                std::tuple<bool>>::type;
-    static constexpr value_type value() {
-        auto prog = Program();
-        return std::tuple_cat(
-            std::tuple(std::get<0>(prog.value()) == std::get<1>(prog.value())),
-            detail::remove<typename Program::value_type, 2>()(prog.value())
-        );
-    }
-};
+struct Add : binop_detail::BinOp<binop_detail::Sum<typename std::tuple_element<0, typename Program::value_type>::type,
+                                                   typename std::tuple_element<1, typename Program::value_type>::type>,
+                                 Program> {};
+
+template<typename Program>
+requires tuple_detail::is_tuple<typename Program::value_type>::value &&
+         (std::tuple_size<typename Program::value_type>::value >= 3)
+struct Equals : binop_detail::BinOp<binop_detail::Equals<typename std::tuple_element<0, typename Program::value_type>::type,
+                                                         typename std::tuple_element<1, typename Program::value_type>::type>,
+                                    Program>{};
