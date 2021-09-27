@@ -15,6 +15,6 @@ int main() {
                          >();
     std::cout << typeid(decltype(program)::value_type).name() << std::endl;
 
-    std::cout << std::get<0>(program.value()) << std::endl;
+    std::cout << std::boolalpha << std::get<0>(program.value()) << std::endl;
 
 }
