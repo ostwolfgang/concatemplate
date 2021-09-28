@@ -111,6 +111,18 @@ struct Pop {
     }
 };
 
+template<typename Program>
+struct Dup {
+    using program_value_type = Program::value_type;
+    using value_type = tuple_detail::tuple_cat_helper<program_value_type,
+                                                      std::tuple<std::tuple_element_t<0,
+                                                                                      program_value_type>>>::type;
+    static constexpr value_type value() {
+        auto val = Program().value();
+        return std::tuple_cat(std::tuple(std::get<0>(val)), val);
+    }
+};
+
 
 // Binary operations (a b --> c)
 namespace binop_detail {
