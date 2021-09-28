@@ -1,6 +1,14 @@
 #include <tuple>
 #include <type_traits>
 
+// A type to mark the bottom of the stack
+struct BottomType {
+    using value_type = std::tuple<int>;
+    static constexpr std::tuple<int> value() {
+        return std::tuple<int>(0);
+    }
+};
+
 namespace tuple_detail {
 
     template<typename>
@@ -8,6 +16,9 @@ namespace tuple_detail {
 
     template<typename... T>
     struct is_tuple<std::tuple<T...>>: std::true_type {};
+
+    template<typename T>
+    constexpr bool is_tuple_v = is_tuple<T>::value;
 
     template<typename S, typename... A>
     requires is_tuple<S>::value &&
@@ -34,18 +45,18 @@ namespace tuple_detail {
 
         template<size_t M, typename X>
         std::enable_if<M < std::tuple_size<X>::value - 1,
-                       tuple_cat_helper<typename getfrom_helper<M+1, X>::type,
+                       tuple_cat_helper<typename getfrom_helper<M+1, X>::type,  // TODO: why M+1 if M+1 is lready in getfrom_helper?
                                         std::tuple<typename std::tuple_element<M, X>::type>
                                        >
                       >::type
-        static getfrom(X x) {
+        static constexpr getfrom(X x) {
             return std::tuple_cat(std::tuple(std::get<M>(x)), getfrom<M+1, X>(x));
         }
 
         template<size_t M, typename X>
         std::enable_if<M == std::tuple_size<X>::value - 1,
                        std::tuple<typename std::tuple_element<M, X>::type>>::type
-        static getfrom(X x) {
+        static constexpr getfrom(X x) {
             return std::tuple<typename std::tuple_element<M, X>::type>(std::get<M>(x));
         }
 
@@ -60,19 +71,13 @@ namespace tuple_detail {
 
     public:
         using type = helper<N, T>::type;
-        auto operator()(T t) {
+        constexpr auto operator()(T t) {
             return getfrom<N, T>(t);
         }
     };
 
 }
 
-struct BottomType {
-    using value_type = std::tuple<int>;
-    static constexpr std::tuple<int> value() {
-        return std::tuple<int>(0);
-    }
-};
 struct Init {
     using value_type = std::tuple<BottomType>;
     static constexpr value_type value() {
@@ -130,7 +135,7 @@ namespace binop_detail {
 
     template<typename A, typename B>
     struct Sum {
-        auto operator()(A a, B b) const {
+        constexpr auto operator()(A a, B b) {
             return a + b;
         }
         using result_type = std::invoke_result<Sum<A, B>, A, B>::type;
@@ -138,7 +143,7 @@ namespace binop_detail {
 
     template<typename A, typename B>
     struct Equals {
-        auto operator()(A a, B b) const {
+        constexpr auto operator()(A a, B b) {
             return a == b;
         }
         using result_type = std::invoke_result<Equals<A, B>, A, B>::type;
@@ -159,3 +164,38 @@ requires tuple_detail::is_tuple<typename Program::value_type>::value &&
 struct Equals : binop_detail::BinOp<binop_detail::Equals<typename std::tuple_element<0, typename Program::value_type>::type,
                                                          typename std::tuple_element<1, typename Program::value_type>::type>,
                                     Program>{};
+
+// Concatenate 'Front' and 'Back' to a program which first executes 'Back', then 'Front'.
+// 'Front' requires a single program template parameter
+template<template<typename> typename Front, typename Back>
+struct Concatenate {
+    using program = Front<Back>;
+    using value_type = program::value_type;
+    static constexpr value_type value() {
+        return program().value();
+    }
+};
+
+template<template<typename> typename ConditionFragment,
+         template<typename> typename ThenBranchFragment,
+         template<typename> typename ElseBranchFragment,
+         typename Program>
+struct IfThenElse {
+    using condition_program = Concatenate<ConditionFragment, Program>;
+    using then_program = Concatenate<ThenBranchFragment, Program>;
+    using else_program = Concatenate<ElseBranchFragment, Program>;
+
+    static constexpr bool condition_value = std::get<0>(condition_program().value());
+
+    using value_type = std::conditional_t<condition_value,
+                                          typename then_program::value_type,
+                                          typename else_program::value_type>;
+
+    static constexpr value_type value() {
+        if constexpr (condition_value) {
+            return then_program().value();
+        } else {
+            return else_program().value();
+        }
+    }
+};
