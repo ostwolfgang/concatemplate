@@ -211,3 +211,34 @@ struct IfThenElse {
         }
     }
 };
+
+template<template<typename> typename CountFragment,
+         template<typename> typename RepeatFragment,
+         typename Program>
+struct Repeat {
+
+    template<size_t N,
+             template<typename> typename Fragment,
+             typename P>
+    struct RepeatHelper {
+        static constexpr auto value() {
+            if constexpr (N == 0) {
+                return P().value();
+            } if constexpr (N == 1) {
+                return Concatenate<Fragment, P>().value();
+            } else {
+                return Concatenate<Fragment, RepeatHelper<N-1, Fragment, P>>().value();
+            }
+        }
+        using value_type = decltype(value());
+    };
+
+public:
+    using count_program = Concatenate<CountFragment, Program>;
+    static constexpr auto repetitions = std::get<0>(count_program().value());
+
+    static constexpr auto value() {
+        return RepeatHelper<repetitions, RepeatFragment, Program>().value();
+    }
+    using value_type = decltype(value());
+};
