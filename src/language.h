@@ -21,61 +21,29 @@ namespace tuple_detail {
     constexpr bool is_tuple_v = is_tuple<T>::value;
 
     template<typename S, typename... A>
-    requires is_tuple<S>::value &&
-             is_tuple<A...>::value &&
-             std::is_default_constructible<S>::value &&
-             std::is_default_constructible<A...>::value
-    struct tuple_cat_helper {
-        auto operator()() { return std::tuple_cat(A()..., S()); }
-        using type = std::invoke_result<tuple_cat_helper<S, A...>>::type;
-    };
+    using tuple_cat_t = decltype(std::tuple_cat(A()..., S()));
 
     template<typename T, size_t N>
     requires is_tuple<T>::value
     struct remove {
     private:
-        template<size_t M, typename X>
-        requires (M < std::tuple_size<X>::value - 1)
-        struct getfrom_helper {
-            auto operator()() {
-                return getfrom<M+1, X>(X());
+        template<size_t M>
+        static constexpr auto getfrom(T t) {
+            if constexpr (M == std::tuple_size_v<T> - 1) {
+                return std::tuple(std::get<M>(t));
+            } else if constexpr (M < std::tuple_size_v<T> - 1) {
+                return std::tuple_cat(std::tuple(std::get<M>(t)), getfrom<M+1>(t));
             }
-            using type = std::invoke_result<getfrom_helper<M, X>>::type;
-        };
-
-        template<size_t M, typename X>
-        std::enable_if<M < std::tuple_size<X>::value - 1,
-                       tuple_cat_helper<typename getfrom_helper<M+1, X>::type,  // TODO: why M+1 if M+1 is lready in getfrom_helper?
-                                        std::tuple<typename std::tuple_element<M, X>::type>
-                                       >
-                      >::type
-        static constexpr getfrom(X x) {
-            return std::tuple_cat(std::tuple(std::get<M>(x)), getfrom<M+1, X>(x));
         }
-
-        template<size_t M, typename X>
-        std::enable_if<M == std::tuple_size<X>::value - 1,
-                       std::tuple<typename std::tuple_element<M, X>::type>>::type
-        static constexpr getfrom(X x) {
-            return std::tuple<typename std::tuple_element<M, X>::type>(std::get<M>(x));
-        }
-
-        template<size_t M, typename X>
-        requires (M < std::tuple_size<X>::value)
-        struct helper {
-            auto operator()() {
-                return getfrom<M, X>(X());
-            }
-            using type = std::invoke_result<helper<M, X>>::type;
-        };
 
     public:
-        using type = helper<N, T>::type;
+        using type = decltype(getfrom<N>(T()));
         constexpr auto operator()(T t) {
-            return getfrom<N, T>(t);
+            return getfrom<N>(t);
         }
     };
-
+    template<typename T, size_t N>
+    using remove_t = remove<T, N>::type;
 }
 
 struct Init {
@@ -96,7 +64,7 @@ struct Literal {
 template<typename T, typename Program>
 requires tuple_detail::is_tuple<typename Program::value_type>::value
 struct Push {
-    using value_type = tuple_detail::tuple_cat_helper<typename Program::value_type, typename T::value_type>::type;
+    using value_type = tuple_detail::tuple_cat_t<typename Program::value_type, typename T::value_type>;
     static constexpr value_type value() {
         return std::tuple_cat(T::value(), Program::value());
     }
@@ -105,7 +73,7 @@ struct Push {
 template<typename Program>
 requires tuple_detail::is_tuple<typename Program::value_type>::value
 struct Pop {
-    using value_type = tuple_detail::remove<typename Program::value_type, 1>::type;
+    using value_type = tuple_detail::remove_t<typename Program::value_type, 1>;
     static constexpr value_type value() {
         return tuple_detail::remove<typename Program::value_type, 1>()(Program().value());
     }
@@ -114,9 +82,8 @@ struct Pop {
 template<typename Program>
 struct Dup {
     using program_value_type = Program::value_type;
-    using value_type = tuple_detail::tuple_cat_helper<program_value_type,
-                                                      std::tuple<std::tuple_element_t<0,
-                                                                                      program_value_type>>>::type;
+    using value_type = tuple_detail::tuple_cat_t<program_value_type,
+                                                 std::tuple<std::tuple_element_t<0, program_value_type>>>;
     static constexpr value_type value() {
         auto val = Program().value();
         return std::tuple_cat(std::tuple(std::get<0>(val)), val);
@@ -133,8 +100,8 @@ namespace binop_detail {
              (std::tuple_size<typename Program::value_type>::value >= 3)
     struct BinOp {
         using op_result_type = Op::result_type;
-        using value_type = tuple_detail::tuple_cat_helper<typename tuple_detail::remove<typename Program::value_type, 2>::type,
-                                                          std::tuple<op_result_type>>::type;
+        using value_type = tuple_detail::tuple_cat_t<tuple_detail::remove_t<typename Program::value_type, 2>,
+                                                     std::tuple<op_result_type>>;
         static constexpr value_type value() {
             auto prog = Program();
             auto val = prog.value();
