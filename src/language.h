@@ -46,6 +46,19 @@ namespace tuple_detail {
     using remove_t = remove<T, N>::type;
 }
 
+template<typename P>
+concept code_fragment = requires (P p) {
+    tuple_detail::is_tuple(P::value_type);
+    p.value() -> P::value_type;
+};
+
+template<typename P>
+concept program = requires {
+    code_fragment<P>;
+    std::same_as<BottomType, std::tuple_element_t<std::tuple_size_v<typename P::value_type> - 1,
+                                                  typename P::value_type>>;
+};
+
 struct Init {
     using value_type = std::tuple<BottomType>;
     static constexpr value_type value() {
@@ -61,8 +74,7 @@ struct Literal {
     }
 };
 
-template<typename T, typename Program>
-requires tuple_detail::is_tuple<typename Program::value_type>::value
+template<typename T, program Program>
 struct Push {
     using value_type = tuple_detail::tuple_cat_t<typename Program::value_type, typename T::value_type>;
     static constexpr value_type value() {
@@ -70,8 +82,7 @@ struct Push {
     }
 };
 
-template<typename Program>
-requires tuple_detail::is_tuple<typename Program::value_type>::value
+template<program Program>
 struct Pop {
     using value_type = tuple_detail::remove_t<typename Program::value_type, 1>;
     static constexpr value_type value() {
@@ -79,7 +90,7 @@ struct Pop {
     }
 };
 
-template<typename Program>
+template<program Program>
 struct Dup {
     using program_value_type = Program::value_type;
     using value_type = tuple_detail::tuple_cat_t<program_value_type,
@@ -95,9 +106,8 @@ struct Dup {
 namespace binop_detail {
 
     // Generic binary operation instruction
-    template<typename Op, typename Program>
-    requires tuple_detail::is_tuple<typename Program::value_type>::value &&
-             (std::tuple_size<typename Program::value_type>::value >= 3)
+    template<typename Op, program Program>
+    requires (std::tuple_size<typename Program::value_type>::value >= 3)
     struct BinOp {
         using op_result_type = Op::result_type;
         using value_type = tuple_detail::tuple_cat_t<tuple_detail::remove_t<typename Program::value_type, 2>,
@@ -130,23 +140,21 @@ namespace binop_detail {
 
 }
 
-template<typename Program>
-requires tuple_detail::is_tuple<typename Program::value_type>::value &&
-         (std::tuple_size<typename Program::value_type>::value >= 3)
+template<program Program>
 struct Add : binop_detail::BinOp<binop_detail::Sum<typename std::tuple_element<0, typename Program::value_type>::type,
                                                    typename std::tuple_element<1, typename Program::value_type>::type>,
                                  Program> {};
 
-template<typename Program>
-requires tuple_detail::is_tuple<typename Program::value_type>::value &&
-         (std::tuple_size<typename Program::value_type>::value >= 3)
+template<program Program>
 struct Equals : binop_detail::BinOp<binop_detail::Equals<typename std::tuple_element<0, typename Program::value_type>::type,
                                                          typename std::tuple_element<1, typename Program::value_type>::type>,
                                     Program>{};
 
 // Concatenate 'Front' and 'Back' to a program which first executes 'Back', then 'Front'.
 // 'Front' requires a single program template parameter
-template<template<typename> typename Front, typename Back>
+// This is just another way of writing 'Front<Back>'
+template<template<typename> typename Front, program Back>
+    requires program<Front<Back>>
 struct Concatenate {
     using program = Front<Back>;
     using value_type = program::value_type;
@@ -158,7 +166,10 @@ struct Concatenate {
 template<template<typename> typename ConditionFragment,
          template<typename> typename ThenBranchFragment,
          template<typename> typename ElseBranchFragment,
-         typename Program>
+         program Program>
+    requires program<ConditionFragment<Program>> &&
+             program<ThenBranchFragment<Program>> &&
+             program<ElseBranchFragment<Program>>
 struct IfThenElse {
     using condition_program = Concatenate<ConditionFragment, Program>;
     using then_program = Concatenate<ThenBranchFragment, Program>;
@@ -181,7 +192,9 @@ struct IfThenElse {
 
 template<template<typename> typename CountFragment,
          template<typename> typename RepeatFragment,
-         typename Program>
+         program Program>
+    requires program<Concatenate<CountFragment, Program>> &&
+             program<Concatenate<RepeatFragment, Program>>
 struct Repeat {
 
     template<size_t N,
