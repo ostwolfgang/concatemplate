@@ -47,14 +47,14 @@ namespace tuple_detail {
 }
 
 template<typename P>
-concept code_fragment = requires (P p) {
+concept computable = requires (P p) {
     tuple_detail::is_tuple(P::value_type);
     p.value() -> P::value_type;
 };
 
 template<typename P>
 concept program = requires {
-    code_fragment<P>;
+    computable<P>;
     std::same_as<BottomType, std::tuple_element_t<std::tuple_size_v<typename P::value_type> - 1,
                                                   typename P::value_type>>;
 };
